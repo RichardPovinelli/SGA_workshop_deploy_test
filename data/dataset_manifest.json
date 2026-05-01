@@ -1,0 +1,41 @@
+{
+  "artifact_filename": "sga_workshop_dataset_v1.parquet.gz",
+  "artifact_type": "dataset",
+  "build_seed": 20260501,
+  "build_timestamp": "2026-05-01T16:25:33.029866+00:00",
+  "build_version": "1",
+  "columns": [
+    "date",
+    "zone",
+    "demand",
+    "temp",
+    "hdd",
+    "cdd",
+    "dow",
+    "is_weekend",
+    "month",
+    "lag1",
+    "lag7",
+    "target_h1",
+    "target_h2",
+    "target_h3",
+    "target_h4",
+    "target_h5",
+    "target_h6",
+    "target_h7",
+    "split"
+  ],
+  "max_date": "2011-12-25",
+  "min_date": "2005-01-08",
+  "release_tag": "dataset-v1",
+  "rows": 2417,
+  "runtime_compatibility_version": "1",
+  "schema_version": "1",
+  "split_counts": {
+    "test": 347,
+    "train": 2070
+  },
+  "zone_list": [
+    "zone_1"
+  ]
+}

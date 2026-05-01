@@ -1,0 +1,10 @@
+pandas
+pyarrow
+pytest
+ruff
+scikit-learn
+scipy
+statsmodels
+xgboost
+ipykernel
+matplotlib
