@@ -9,7 +9,31 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, cast
 
+import numpy as np
 import pandas as pd
+
+try:
+    import torch
+    import torch.nn as nn
+
+    class _MLP(nn.Module):
+        """Simple MLP for direct horizon forecasting."""
+
+        def __init__(self, n_features: int, hidden: int) -> None:
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.Linear(n_features, hidden),
+                nn.ReLU(),
+                nn.Linear(hidden, hidden),
+                nn.ReLU(),
+                nn.Linear(hidden, 1),
+            )
+
+        def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+            return self.net(x).squeeze(-1)
+
+except ImportError:
+    pass
 
 from src.config import (
     ALLOWED_HORIZONS,
@@ -26,6 +50,25 @@ from src.config import (
 )
 from src.data.split import get_target_column, validate_horizon
 from src.evaluation.metrics import build_results_table
+
+
+class TFTHorizonModel:
+    """Trained horizon model satisfying the workshop predict(df) contract."""
+
+    def __init__(self, net: Any, feature_columns: list[str], x_mean: np.ndarray, x_std: np.ndarray) -> None:
+        self.net = net
+        self.feature_columns = feature_columns
+        self.x_mean = x_mean
+        self.x_std = x_std
+
+    def predict(self, df: pd.DataFrame) -> np.ndarray:
+        import torch
+        x = df[self.feature_columns].to_numpy(dtype=np.float32)
+        x = (x - self.x_mean) / (self.x_std + 1e-8)
+        tensor = torch.tensor(x, dtype=torch.float32)
+        self.net.eval()
+        with torch.no_grad():
+            return self.net(tensor).numpy()
 
 
 class TFTDependencyError(ImportError):
