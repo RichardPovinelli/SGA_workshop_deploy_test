@@ -240,7 +240,8 @@ def load_tft_model_for_horizon(  # pylint: disable=too-many-arguments
 
     if loader is None:
         dependency = _import_tft_dependency(dependency_module)
-        loader = dependency.load
+        # weights_only=False required for checkpoints saved before PyTorch 2.6
+        loader = lambda path: dependency.load(path, weights_only=False)  # noqa: E731
 
     assert loader is not None
     return loader(installed_map.checkpoints[validated_horizon])
