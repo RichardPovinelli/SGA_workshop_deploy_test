@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import cast
 
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
@@ -37,9 +38,7 @@ def validate_dataset_schema(df: pd.DataFrame) -> None:
     zone_series = df["zone"]
     if zone_series.isna().any():
         raise ValueError("Column 'zone' must not contain missing values.")
-    if not zone_series.map(
-        lambda value: isinstance(value, str) and value.strip() != ""
-    ).all():
+    if not zone_series.map(lambda value: isinstance(value, str) and value.strip() != "").all():
         raise ValueError("Column 'zone' must contain non-empty string identifiers.")
 
     split_values = set(df["split"].dropna().unique().tolist())
@@ -54,10 +53,10 @@ def validate_dataset_schema(df: pd.DataFrame) -> None:
         if not is_numeric_dtype(df[field]):
             raise ValueError(f"Column '{field}' must be numeric.")
 
-    missing_modeling_values = df.loc[:, MODELING_REQUIRED_FIELDS].isna().sum()
+    missing_modeling_values = cast(
+        pd.Series,
+        df.loc[:, MODELING_REQUIRED_FIELDS].isna().sum(axis=0),
+    )
     invalid_fields = missing_modeling_values[missing_modeling_values > 0].index.tolist()
     if invalid_fields:
-        raise ValueError(
-            "Required modeling columns must not contain missing values: "
-            f"{invalid_fields}"
-        )
+        raise ValueError(f"Required modeling columns must not contain missing values: {invalid_fields}")

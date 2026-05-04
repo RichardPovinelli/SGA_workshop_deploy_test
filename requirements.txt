@@ -1,3 +1,6 @@
+ipykernel
+matplotlib
+openpyxl
 pandas
 pyarrow
 pytest
@@ -6,5 +9,3 @@ scikit-learn
 scipy
 statsmodels
 xgboost
-ipykernel
-matplotlib

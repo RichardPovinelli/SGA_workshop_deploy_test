@@ -7,7 +7,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import pandas as pd
 
@@ -82,9 +82,7 @@ def _resolve_tft_bundle_path(
 
 
 def _resolve_tft_artifact_root(artifact_root: str | Path | None = None) -> Path:
-    return (
-        Path(artifact_root) if artifact_root is not None else DEFAULT_TFT_INSTALL_ROOT
-    )
+    return Path(artifact_root) if artifact_root is not None else DEFAULT_TFT_INSTALL_ROOT
 
 
 def _import_tft_dependency(module_name: str = "torch") -> Any:
@@ -109,52 +107,35 @@ def _validate_checkpoint_map_payload(payload: dict[str, Any]) -> None:
         "supported_horizons",
         "horizons",
     )
-    missing_fields = [
-        field for field in required_top_level_fields if field not in payload
-    ]
+    missing_fields = [field for field in required_top_level_fields if field not in payload]
     if missing_fields:
-        raise TFTCheckpointMapError(
-            f"TFT checkpoint map is missing required field(s): {missing_fields}."
-        )
+        raise TFTCheckpointMapError(f"TFT checkpoint map is missing required field(s): {missing_fields}.")
 
     horizons = payload["horizons"]
     if not isinstance(horizons, dict):
-        raise TFTCheckpointMapError(
-            "TFT checkpoint map field 'horizons' must be an object."
-        )
+        raise TFTCheckpointMapError("TFT checkpoint map field 'horizons' must be an object.")
     if payload["artifact_type"] != TFT_ARTIFACT_TYPE:
-        raise TFTCheckpointMapError(
-            "TFT checkpoint map artifact_type must be 'tft_checkpoints'."
-        )
+        raise TFTCheckpointMapError("TFT checkpoint map artifact_type must be 'tft_checkpoints'.")
 
     expected_keys = {str(horizon) for horizon in ALLOWED_HORIZONS}
     observed_keys = set(horizons.keys())
     if observed_keys != expected_keys:
         raise TFTCheckpointMapError(
-            "TFT checkpoint map must define horizons 1 through 7 exactly; "
-            f"found keys: {sorted(observed_keys)}."
+            f"TFT checkpoint map must define horizons 1 through 7 exactly; found keys: {sorted(observed_keys)}."
         )
     supported_horizons = tuple(payload["supported_horizons"])
     if tuple(int(horizon) for horizon in supported_horizons) != SUPPORTED_TFT_HORIZONS:
-        raise TFTCheckpointMapError(
-            "TFT checkpoint map supported_horizons must match 1 through 7 exactly."
-        )
+        raise TFTCheckpointMapError("TFT checkpoint map supported_horizons must match 1 through 7 exactly.")
 
 
 def _resolve_relative_checkpoint_path(artifact_root: Path, relative_path: str) -> Path:
     checkpoint_path = Path(relative_path)
     if checkpoint_path.is_absolute():
-        raise TFTCheckpointMapError(
-            "Checkpoint paths must be relative to the extracted TFT root."
-        )
+        raise TFTCheckpointMapError("Checkpoint paths must be relative to the extracted TFT root.")
     if not relative_path or relative_path.strip() == "":
-        raise TFTCheckpointMapError(
-            "Checkpoint paths must be non-empty relative paths."
-        )
+        raise TFTCheckpointMapError("Checkpoint paths must be non-empty relative paths.")
     if ".." in checkpoint_path.parts:
-        raise TFTCheckpointMapError(
-            "Checkpoint paths must stay within the extracted TFT root; '..' is not allowed."
-        )
+        raise TFTCheckpointMapError("Checkpoint paths must stay within the extracted TFT root; '..' is not allowed.")
     return artifact_root / checkpoint_path
 
 
@@ -174,12 +155,10 @@ def load_installed_tft_checkpoint_map(  # pylint: disable=too-many-locals
     if not resolved_artifact_root.exists():
         if not resolved_bundle_path.exists():
             raise TFTBundleNotFoundError(
-                "TFT checkpoint bundle is missing. Expected bundle asset at "
-                f"{resolved_bundle_path}."
+                f"TFT checkpoint bundle is missing. Expected bundle asset at {resolved_bundle_path}."
             )
         raise TFTExtractionError(
-            "TFT checkpoint bundle was found but the extracted checkpoint root is missing: "
-            f"{resolved_artifact_root}."
+            f"TFT checkpoint bundle was found but the extracted checkpoint root is missing: {resolved_artifact_root}."
         )
 
     manifest_path = resolved_artifact_root / TFT_CHECKPOINT_MAP_FILENAME
@@ -192,9 +171,7 @@ def load_installed_tft_checkpoint_map(  # pylint: disable=too-many-locals
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise TFTCheckpointMapError(
-            f"TFT checkpoint map is not valid JSON: {manifest_path}."
-        ) from exc
+        raise TFTCheckpointMapError(f"TFT checkpoint map is not valid JSON: {manifest_path}.") from exc
 
     _validate_checkpoint_map_payload(payload)
 
@@ -217,9 +194,7 @@ def load_installed_tft_checkpoint_map(  # pylint: disable=too-many-locals
     checkpoints: dict[int, Path] = {}
     for horizon_text, relative_path in payload["horizons"].items():
         if not isinstance(relative_path, str):
-            raise TFTCheckpointMapError(
-                f"Checkpoint path for horizon {horizon_text!r} must be a string."
-            )
+            raise TFTCheckpointMapError(f"Checkpoint path for horizon {horizon_text!r} must be a string.")
         horizon = int(horizon_text)
         resolved_checkpoint_path = _resolve_relative_checkpoint_path(
             resolved_artifact_root,
@@ -227,8 +202,7 @@ def load_installed_tft_checkpoint_map(  # pylint: disable=too-many-locals
         )
         if not resolved_checkpoint_path.exists():
             raise TFTExtractionError(
-                "TFT checkpoint file listed in the checkpoint map is missing: "
-                f"{resolved_checkpoint_path}."
+                f"TFT checkpoint file listed in the checkpoint map is missing: {resolved_checkpoint_path}."
             )
         checkpoints[horizon] = resolved_checkpoint_path
 
@@ -268,6 +242,7 @@ def load_tft_model_for_horizon(  # pylint: disable=too-many-arguments
         dependency = _import_tft_dependency(dependency_module)
         loader = dependency.load
 
+    assert loader is not None
     return loader(installed_map.checkpoints[validated_horizon])
 
 
@@ -300,15 +275,12 @@ def predict_tft(  # pylint: disable=too-many-arguments
     elif callable(resolved_model):
         predictions = resolved_model(df)
     else:
-        raise TypeError(
-            "Loaded TFT model must be callable or provide a predict(df) method."
-        )
+        raise TypeError("Loaded TFT model must be callable or provide a predict(df) method.")
 
-    prediction_series = pd.Series(predictions, index=df.index, name="prediction")
+    prediction_data = cast(Any, predictions)
+    prediction_series = pd.Series(prediction_data, index=df.index, name="prediction")
     if len(prediction_series) != len(df):
-        raise ValueError(
-            "TFT prediction output must align one-to-one with the input DataFrame rows."
-        )
+        raise ValueError("TFT prediction output must align one-to-one with the input DataFrame rows.")
     return prediction_series
 
 

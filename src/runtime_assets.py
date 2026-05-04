@@ -62,9 +62,7 @@ class AssetDescriptor:
     compatibility_version: str
 
 
-def build_github_release_asset_url(
-    owner: str, repo: str, tag: str, filename: str
-) -> str:
+def build_github_release_asset_url(owner: str, repo: str, tag: str, filename: str) -> str:
     """Return the canonical GitHub release asset URL."""
     return f"https://github.com/{owner}/{repo}/releases/download/{tag}/{filename}"
 
@@ -173,9 +171,7 @@ def _resolve_install_state_path(state_path: str | Path) -> Path:
         path.name == DATASET_INSTALL_STATE_PATH.name and path.parent.name == "data"
     ):
         return _dataset_install_state_path()
-    if path == TFT_INSTALL_STATE_PATH or (
-        path.name == TFT_INSTALL_STATE_PATH.name and path.parent.name == "tft"
-    ):
+    if path == TFT_INSTALL_STATE_PATH or (path.name == TFT_INSTALL_STATE_PATH.name and path.parent.name == "tft"):
         return _tft_install_state_path()
     return path
 
@@ -185,8 +181,7 @@ def ensure_supported_bootstrap_platform(system_name: str | None = None) -> str:
     resolved_system_name = system_name or platform.system()
     if resolved_system_name not in SUPPORTED_POSIX_SYSTEMS:
         raise RuntimeError(
-            "bootstrap.sh supports POSIX-style environments only. "
-            "Use Google Colab, a POSIX shell, or WSL on Windows."
+            "bootstrap.sh supports POSIX-style environments only. Use Google Colab, a POSIX shell, or WSL on Windows."
         )
     return resolved_system_name
 
@@ -219,66 +214,45 @@ def validate_dataset_manifest_payload(payload: dict[str, Any]) -> None:
     )
     missing_fields = [field for field in required_fields if field not in payload]
     if missing_fields:
-        raise DatasetCompatibilityError(
-            f"Dataset manifest is missing required field(s): {missing_fields}."
-        )
+        raise DatasetCompatibilityError(f"Dataset manifest is missing required field(s): {missing_fields}.")
     if payload["artifact_type"] != DATASET_ARTIFACT_TYPE:
-        raise DatasetCompatibilityError(
-            "Dataset manifest artifact_type must be 'dataset'."
-        )
+        raise DatasetCompatibilityError("Dataset manifest artifact_type must be 'dataset'.")
     if str(payload["schema_version"]) != EXPECTED_DATASET_SCHEMA_VERSION:
-        raise DatasetCompatibilityError(
-            "Dataset schema_version is incompatible with the current runtime."
-        )
-    if (
-        str(payload["runtime_compatibility_version"])
-        != EXPECTED_DATASET_RUNTIME_COMPATIBILITY_VERSION
-    ):
+        raise DatasetCompatibilityError("Dataset schema_version is incompatible with the current runtime.")
+    if str(payload["runtime_compatibility_version"]) != EXPECTED_DATASET_RUNTIME_COMPATIBILITY_VERSION:
         raise DatasetCompatibilityError(
             "Dataset runtime_compatibility_version is incompatible with the current runtime."
         )
 
 
 def validate_installed_dataset(
-    dataset_path: str | Path = DATASET_LOCAL_PATH,
+    dataset_path: str | Path = DATASET_LOCAL_PATH,  # callers should pass DATASET_PATH; kept for backward compat
     manifest_path: str | Path | None = None,
 ) -> pd.DataFrame:
     """Load and validate an installed dataset plus its compatibility manifest."""
     resolved_dataset_path = Path(dataset_path)
     resolved_manifest_path = (
-        Path(manifest_path)
-        if manifest_path is not None
-        else dataset_manifest_path_for(resolved_dataset_path)
+        Path(manifest_path) if manifest_path is not None else dataset_manifest_path_for(resolved_dataset_path)
     )
     if not resolved_dataset_path.exists():
-        raise FileNotFoundError(
-            f"Installed dataset artifact is missing: {resolved_dataset_path}"
-        )
+        raise FileNotFoundError(f"Installed dataset artifact is missing: {resolved_dataset_path}")
     if not resolved_manifest_path.exists():
-        raise DatasetCompatibilityError(
-            f"Dataset manifest is missing: {resolved_manifest_path}"
-        )
+        raise DatasetCompatibilityError(f"Dataset manifest is missing: {resolved_manifest_path}")
 
     manifest = _read_json(resolved_manifest_path)
     validate_dataset_manifest_payload(manifest)
 
-    df = pd.read_parquet(resolved_dataset_path, engine="pyarrow")
+    df = pd.read_parquet(resolved_dataset_path, engine="pyarrow")  # type: ignore[arg-type]
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"], errors="raise")
     validate_dataset_schema(df)
 
     if int(manifest["rows"]) != len(df):
-        raise DatasetCompatibilityError(
-            "Dataset manifest row count does not match installed data."
-        )
+        raise DatasetCompatibilityError("Dataset manifest row count does not match installed data.")
     if list(manifest["columns"]) != list(df.columns):
-        raise DatasetCompatibilityError(
-            "Dataset manifest columns do not match installed data."
-        )
+        raise DatasetCompatibilityError("Dataset manifest columns do not match installed data.")
     if list(manifest["zone_list"]) != get_sorted_zones(df):
-        raise DatasetCompatibilityError(
-            "Dataset manifest zone ordering does not match installed data."
-        )
+        raise DatasetCompatibilityError("Dataset manifest zone ordering does not match installed data.")
 
     return df
 
@@ -298,9 +272,7 @@ def load_install_state(state_path: str | Path) -> dict[str, Any] | None:
     )
     missing_fields = [field for field in required_fields if field not in payload]
     if missing_fields:
-        raise InstallStateError(
-            f"Install-state metadata is missing required field(s): {missing_fields}."
-        )
+        raise InstallStateError(f"Install-state metadata is missing required field(s): {missing_fields}.")
     return payload
 
 
@@ -320,30 +292,19 @@ def install_dataset_from_file(
     """Install a dataset artifact plus manifest into the canonical local state path."""
     source_path = Path(source_dataset_path)
     source_manifest = (
-        Path(source_manifest_path)
-        if source_manifest_path is not None
-        else dataset_manifest_path_for(source_path)
+        Path(source_manifest_path) if source_manifest_path is not None else dataset_manifest_path_for(source_path)
     )
     if not source_path.exists():
         raise FileNotFoundError(f"Source dataset artifact is missing: {source_path}")
     if not source_manifest.exists():
-        raise FileNotFoundError(
-            f"Source dataset manifest is missing: {source_manifest}"
-        )
+        raise FileNotFoundError(f"Source dataset manifest is missing: {source_manifest}")
 
     manifest = _read_json(source_manifest)
     validate_dataset_manifest_payload(manifest)
-    if (
-        requested_release_tag is not None
-        and manifest.get("release_tag") != requested_release_tag
-    ):
-        raise DatasetCompatibilityError(
-            "Requested dataset release_tag does not match source manifest."
-        )
+    if requested_release_tag is not None and manifest.get("release_tag") != requested_release_tag:
+        raise DatasetCompatibilityError("Requested dataset release_tag does not match source manifest.")
     if requested_filename is not None and source_path.name != requested_filename:
-        raise DatasetCompatibilityError(
-            "Requested dataset filename does not match source artifact."
-        )
+        raise DatasetCompatibilityError("Requested dataset filename does not match source artifact.")
 
     dataset_local_path = _dataset_local_path()
     dataset_manifest_local_path = _dataset_manifest_local_path()
@@ -361,8 +322,7 @@ def install_dataset_from_file(
                 requested_release_tag or DATASET_RELEASE_TAG,
             ),
             "installed_filename": source_path.name,
-            "install_timestamp": install_timestamp
-            or datetime.now(timezone.utc).isoformat(),
+            "install_timestamp": install_timestamp or datetime.now(timezone.utc).isoformat(),
             "compatibility_version": manifest["runtime_compatibility_version"],
             "local_install_path": str(dataset_local_path),
         },
@@ -382,9 +342,7 @@ def install_tft_bundle_from_file(
     if not source_path.exists():
         raise FileNotFoundError(f"Source TFT bundle is missing: {source_path}")
     if requested_filename is not None and source_path.name != requested_filename:
-        raise ValueError(
-            "Requested TFT bundle filename does not match source artifact."
-        )
+        raise ValueError("Requested TFT bundle filename does not match source artifact.")
 
     tft_bundle_local_path = _tft_bundle_local_path()
     tft_install_state_path = _tft_install_state_path()
@@ -397,10 +355,7 @@ def install_tft_bundle_from_file(
     if Path(tft_bundle_local_path.parent / "..").resolve() == Path(".").resolve():
         raise ValueError("TFT local state must live outside the repo root.")
 
-    if (
-        Path(tft_bundle_local_path.parent.parent).resolve()
-        != Path(tft_install_state_path.parent).resolve()
-    ):
+    if Path(tft_bundle_local_path.parent.parent).resolve() != Path(tft_install_state_path.parent).resolve():
         tft_install_state_path.parent.mkdir(parents=True, exist_ok=True)
     if Path(tft_bundle_local_path.parent).exists():
         pass
@@ -426,8 +381,7 @@ def install_tft_bundle_from_file(
             "artifact_type": TFT_ARTIFACT_TYPE,
             "installed_tag": requested_release_tag or TFT_RELEASE_TAG,
             "installed_filename": source_path.name,
-            "install_timestamp": install_timestamp
-            or datetime.now(timezone.utc).isoformat(),
+            "install_timestamp": install_timestamp or datetime.now(timezone.utc).isoformat(),
             "compatibility_version": installed_map.runtime_compatibility_version,
             "extracted_root": str(installed_map.artifact_root),
         },

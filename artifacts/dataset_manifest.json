@@ -2,7 +2,7 @@
   "artifact_filename": "sga_workshop_dataset_v1.parquet.gz",
   "artifact_type": "dataset",
   "build_seed": 20260501,
-  "build_timestamp": "2026-05-01T16:25:33.029866+00:00",
+  "build_timestamp": "2026-05-04T15:55:38.512792+00:00",
   "build_version": "1",
   "columns": [
     "date",
