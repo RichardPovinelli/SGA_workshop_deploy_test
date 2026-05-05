@@ -20,12 +20,6 @@ def _missing_fields(columns: Iterable[str]) -> list[str]:
     return [field for field in REQUIRED_SCHEMA_FIELDS if field not in present]
 
 
-def get_sorted_zones(df: pd.DataFrame) -> list[str]:
-    """Return deterministic zone ordering for reporting and notebooks."""
-    zones = sorted(df["zone"].astype(str).unique().tolist())
-    return zones
-
-
 def validate_dataset_schema(df: pd.DataFrame) -> None:
     """Validate the public dataset contract."""
     missing_fields = _missing_fields(df.columns)
@@ -34,12 +28,6 @@ def validate_dataset_schema(df: pd.DataFrame) -> None:
 
     if not pd.api.types.is_datetime64_any_dtype(df["date"]):
         raise ValueError("Column 'date' must be parsed as datetime.")
-
-    zone_series = df["zone"]
-    if zone_series.isna().any():
-        raise ValueError("Column 'zone' must not contain missing values.")
-    if not zone_series.map(lambda value: isinstance(value, str) and value.strip() != "").all():
-        raise ValueError("Column 'zone' must contain non-empty string identifiers.")
 
     split_values = set(df["split"].dropna().unique().tolist())
     if split_values != ALLOWED_SPLITS:

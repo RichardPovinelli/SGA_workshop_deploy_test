@@ -32,7 +32,7 @@ class DirectLinearModel:
 def fit_linear_model(df: pd.DataFrame, horizon: int) -> DirectLinearModel:
     """Fit a direct linear baseline using training rows only."""
     validated_horizon = validate_horizon(horizon)
-    feature_columns = tuple(get_feature_columns())
+    feature_columns = tuple(get_feature_columns(validated_horizon))
     target_column = get_target_column(validated_horizon)
     train_df = get_train_df(df)
     estimator = Pipeline(
@@ -56,15 +56,12 @@ def predict_linear(model: DirectLinearModel, df: pd.DataFrame) -> pd.Series:
     return pd.Series(predictions, index=df.index, name="prediction")
 
 
-def evaluate_linear_model(
-    df: pd.DataFrame, horizon: int
-) -> tuple[DirectLinearModel, pd.DataFrame]:
-    """Fit on the train split, predict on the test split, and score by zone."""
+def evaluate_linear_model(df: pd.DataFrame, horizon: int) -> tuple[DirectLinearModel, pd.DataFrame]:
+    """Fit on the train split, predict on the test split, and score aggregated."""
     model = fit_linear_model(df, horizon)
     test_df = get_test_df(df)
     predictions = predict_linear(model, test_df)
     results = build_results_table(
-        test_df.loc[:, ["zone"]],
         test_df[model.target_column],
         predictions,
         model_name="linear",

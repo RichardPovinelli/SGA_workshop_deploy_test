@@ -1,5 +1,5 @@
 {
-  "artifact_type": "tft_checkpoints",
+  "artifact_type": "mlp_forecast_checkpoints",
   "build_version": "1",
   "checkpoint_format_version": "1",
   "runtime_compatibility_version": "1",

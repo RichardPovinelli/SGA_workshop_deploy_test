@@ -24,18 +24,18 @@ from src.config import (
     DATASET_RELEASE_TAG,
     EXPECTED_DATASET_RUNTIME_COMPATIBILITY_VERSION,
     EXPECTED_DATASET_SCHEMA_VERSION,
-    EXPECTED_TFT_RUNTIME_COMPATIBILITY_VERSION,
+    EXPECTED_MLP_FORECAST_RUNTIME_COMPATIBILITY_VERSION,
     GITHUB_REPO_NAME,
     GITHUB_REPO_OWNER,
     RELEASE_STAGING_ROOT,
-    TFT_ARTIFACT_TYPE,
-    TFT_BUNDLE_FILENAME,
-    TFT_BUNDLE_LOCAL_PATH,
-    TFT_INSTALL_STATE_PATH,
-    TFT_RELEASE_TAG,
+    MLP_FORECAST_ARTIFACT_TYPE,
+    MLP_FORECAST_BUNDLE_FILENAME,
+    MLP_FORECAST_BUNDLE_LOCAL_PATH,
+    MLP_FORECAST_INSTALL_STATE_PATH,
+    MLP_FORECAST_RELEASE_TAG,
 )
-from src.data.schema import get_sorted_zones, validate_dataset_schema
-from src.models.tft_inference import load_installed_tft_checkpoint_map
+from src.data.schema import validate_dataset_schema
+from src.models.mlp_forecast import load_installed_mlp_forecast_checkpoint_map
 
 
 RELEASE_ASSETS_MANIFEST_FILENAME = "release_assets_manifest.json"
@@ -85,14 +85,14 @@ def get_dataset_asset_descriptor() -> AssetDescriptor:
     )
 
 
-def get_tft_asset_descriptor() -> AssetDescriptor:
-    """Return the canonical TFT asset descriptor."""
+def get_mlp_forecast_asset_descriptor() -> AssetDescriptor:
+    """Return the canonical MLP Forecast asset descriptor."""
     return AssetDescriptor(
-        artifact_type=TFT_ARTIFACT_TYPE,
-        release_tag=TFT_RELEASE_TAG,
-        filename=TFT_BUNDLE_FILENAME,
-        local_install_path=str(TFT_BUNDLE_LOCAL_PATH.parent),
-        compatibility_version=EXPECTED_TFT_RUNTIME_COMPATIBILITY_VERSION,
+        artifact_type=MLP_FORECAST_ARTIFACT_TYPE,
+        release_tag=MLP_FORECAST_RELEASE_TAG,
+        filename=MLP_FORECAST_BUNDLE_FILENAME,
+        local_install_path=str(MLP_FORECAST_BUNDLE_LOCAL_PATH.parent),
+        compatibility_version=EXPECTED_MLP_FORECAST_RUNTIME_COMPATIBILITY_VERSION,
     )
 
 
@@ -107,9 +107,9 @@ def get_dataset_asset_url() -> str:
     )
 
 
-def get_tft_asset_url() -> str:
-    """Return the canonical TFT release URL."""
-    descriptor = get_tft_asset_descriptor()
+def get_mlp_forecast_asset_url() -> str:
+    """Return the canonical MLP Forecast release URL."""
+    descriptor = get_mlp_forecast_asset_descriptor()
     return build_github_release_asset_url(
         GITHUB_REPO_OWNER,
         GITHUB_REPO_NAME,
@@ -151,16 +151,16 @@ def _dataset_install_state_path() -> Path:
     return _dataset_local_dir() / DATASET_INSTALL_STATE_PATH.name
 
 
-def _tft_artifact_root() -> Path:
-    return _local_state_root() / "tft"
+def _mlp_forecast_artifact_root() -> Path:
+    return _local_state_root() / "mlp_forecast"
 
 
-def _tft_bundle_local_path() -> Path:
-    return _tft_artifact_root() / "bundles" / TFT_BUNDLE_FILENAME
+def _mlp_forecast_bundle_local_path() -> Path:
+    return _mlp_forecast_artifact_root() / "bundles" / MLP_FORECAST_BUNDLE_FILENAME
 
 
-def _tft_install_state_path() -> Path:
-    return _tft_artifact_root() / TFT_INSTALL_STATE_PATH.name
+def _mlp_forecast_install_state_path() -> Path:
+    return _mlp_forecast_artifact_root() / MLP_FORECAST_INSTALL_STATE_PATH.name
 
 
 def _resolve_install_state_path(state_path: str | Path) -> Path:
@@ -171,8 +171,10 @@ def _resolve_install_state_path(state_path: str | Path) -> Path:
         path.name == DATASET_INSTALL_STATE_PATH.name and path.parent.name == "data"
     ):
         return _dataset_install_state_path()
-    if path == TFT_INSTALL_STATE_PATH or (path.name == TFT_INSTALL_STATE_PATH.name and path.parent.name == "tft"):
-        return _tft_install_state_path()
+    if path == MLP_FORECAST_INSTALL_STATE_PATH or (
+        path.name == MLP_FORECAST_INSTALL_STATE_PATH.name and path.parent.name == "mlp_forecast"
+    ):
+        return _mlp_forecast_install_state_path()
     return path
 
 
@@ -204,7 +206,6 @@ def validate_dataset_manifest_payload(payload: dict[str, Any]) -> None:
         "build_version",
         "rows",
         "columns",
-        "zone_list",
         "min_date",
         "max_date",
         "split_counts",
@@ -251,8 +252,6 @@ def validate_installed_dataset(
         raise DatasetCompatibilityError("Dataset manifest row count does not match installed data.")
     if list(manifest["columns"]) != list(df.columns):
         raise DatasetCompatibilityError("Dataset manifest columns do not match installed data.")
-    if list(manifest["zone_list"]) != get_sorted_zones(df):
-        raise DatasetCompatibilityError("Dataset manifest zone ordering does not match installed data.")
 
     return df
 
@@ -330,56 +329,59 @@ def install_dataset_from_file(
     return dataset_local_path
 
 
-def install_tft_bundle_from_file(
+def install_mlp_forecast_bundle_from_file(
     source_bundle_path: str | Path,
     *,
     requested_release_tag: str | None = None,
     requested_filename: str | None = None,
     install_timestamp: str | None = None,
 ) -> Path:
-    """Install and validate a TFT bundle into the canonical local state path."""
+    """Install and validate a MLP Forecast bundle into the canonical local state path."""
     source_path = Path(source_bundle_path)
     if not source_path.exists():
-        raise FileNotFoundError(f"Source TFT bundle is missing: {source_path}")
+        raise FileNotFoundError(f"Source MLP Forecast bundle is missing: {source_path}")
     if requested_filename is not None and source_path.name != requested_filename:
-        raise ValueError("Requested TFT bundle filename does not match source artifact.")
+        raise ValueError("Requested MLP Forecast bundle filename does not match source artifact.")
 
-    tft_bundle_local_path = _tft_bundle_local_path()
-    tft_install_state_path = _tft_install_state_path()
+    mlp_forecast_bundle_local_path = _mlp_forecast_bundle_local_path()
+    mlp_forecast_install_state_path = _mlp_forecast_install_state_path()
 
-    tft_bundle_local_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_path, tft_bundle_local_path)
-    if _dataset_local_path().parent == tft_bundle_local_path.parent:
-        raise ValueError("Dataset and TFT install roots must remain separate.")
+    mlp_forecast_bundle_local_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_path, mlp_forecast_bundle_local_path)
+    if _dataset_local_path().parent == mlp_forecast_bundle_local_path.parent:
+        raise ValueError("Dataset and MLP Forecast install roots must remain separate.")
 
-    if Path(tft_bundle_local_path.parent / "..").resolve() == Path(".").resolve():
-        raise ValueError("TFT local state must live outside the repo root.")
+    if Path(mlp_forecast_bundle_local_path.parent / "..").resolve() == Path(".").resolve():
+        raise ValueError("MLP Forecast local state must live outside the repo root.")
 
-    if Path(tft_bundle_local_path.parent.parent).resolve() != Path(tft_install_state_path.parent).resolve():
-        tft_install_state_path.parent.mkdir(parents=True, exist_ok=True)
-    if Path(tft_bundle_local_path.parent).exists():
+    if (
+        Path(mlp_forecast_bundle_local_path.parent.parent).resolve()
+        != Path(mlp_forecast_install_state_path.parent).resolve()
+    ):
+        mlp_forecast_install_state_path.parent.mkdir(parents=True, exist_ok=True)
+    if Path(mlp_forecast_bundle_local_path.parent).exists():
         pass
 
-    if Path(tft_bundle_local_path.parent.parent).exists():
+    if Path(mlp_forecast_bundle_local_path.parent.parent).exists():
         pass
 
-    extract_root = Path(tft_bundle_local_path.parent.parent / "current")
+    extract_root = Path(mlp_forecast_bundle_local_path.parent.parent / "current")
     if extract_root.exists():
         shutil.rmtree(extract_root)
     extract_root.mkdir(parents=True, exist_ok=True)
 
-    with tarfile.open(tft_bundle_local_path, "r:gz") as archive:
+    with tarfile.open(mlp_forecast_bundle_local_path, "r:gz") as archive:
         archive.extractall(extract_root)
 
-    installed_map = load_installed_tft_checkpoint_map(
+    installed_map = load_installed_mlp_forecast_checkpoint_map(
         artifact_root=extract_root,
-        bundle_path=tft_bundle_local_path,
+        bundle_path=mlp_forecast_bundle_local_path,
     )
     write_install_state(
-        tft_install_state_path,
+        mlp_forecast_install_state_path,
         {
-            "artifact_type": TFT_ARTIFACT_TYPE,
-            "installed_tag": requested_release_tag or TFT_RELEASE_TAG,
+            "artifact_type": MLP_FORECAST_ARTIFACT_TYPE,
+            "installed_tag": requested_release_tag or MLP_FORECAST_RELEASE_TAG,
             "installed_filename": source_path.name,
             "install_timestamp": install_timestamp or datetime.now(timezone.utc).isoformat(),
             "compatibility_version": installed_map.runtime_compatibility_version,
@@ -392,15 +394,15 @@ def install_tft_bundle_from_file(
 def build_release_assets_manifest() -> dict[str, Any]:
     """Return the canonical staged release-assets manifest payload."""
     dataset_descriptor = get_dataset_asset_descriptor()
-    tft_descriptor = get_tft_asset_descriptor()
+    mlp_forecast_descriptor = get_mlp_forecast_asset_descriptor()
     return {
         "dataset": {
             **asdict(dataset_descriptor),
             "artifact_type": DATASET_ARTIFACT_TYPE,
         },
-        "tft_checkpoints": {
-            **asdict(tft_descriptor),
-            "artifact_type": TFT_ARTIFACT_TYPE,
+        "mlp_forecast_checkpoints": {
+            **asdict(mlp_forecast_descriptor),
+            "artifact_type": MLP_FORECAST_ARTIFACT_TYPE,
         },
     }
 

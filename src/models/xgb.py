@@ -8,7 +8,6 @@ from typing import Any
 import pandas as pd
 
 from src.config import ALLOWED_HORIZONS
-from src.data.schema import get_sorted_zones
 from src.data.split import (
     get_feature_columns,
     get_target_column,
@@ -37,9 +36,8 @@ DEFAULT_XGB_PARAMS: dict[str, Any] = {
 
 @dataclass(frozen=True)
 class DirectXGBModel:
-    """Fitted direct XGBoost model metadata for one zone and one horizon."""
+    """Fitted direct XGBoost model metadata for one horizon."""
 
-    zone: str
     horizon: int
     feature_columns: tuple[str, ...]
     target_column: str
@@ -57,15 +55,7 @@ def _import_xgboost() -> Any:
     return XGBRegressor
 
 
-def _get_zone_df(df: pd.DataFrame, zone: str) -> pd.DataFrame:
-    zone_df = df.loc[df["zone"] == zone].copy()
-    if zone_df.empty:
-        raise ValueError(f"Zone {zone!r} was not found in the provided DataFrame.")
-    return zone_df
-
-
 def _make_xgb_results_table(  # pylint: disable=too-many-arguments
-    metadata: pd.DataFrame,
     y_true: pd.Series,
     y_pred: pd.Series,
     *,
@@ -74,7 +64,6 @@ def _make_xgb_results_table(  # pylint: disable=too-many-arguments
     n_test: int,
 ) -> pd.DataFrame:
     results = build_results_table(
-        metadata,
         y_true,
         y_pred,
         model_name="xgboost",
@@ -85,28 +74,25 @@ def _make_xgb_results_table(  # pylint: disable=too-many-arguments
     return results.loc[:, list(XGB_RESULTS_COLUMNS)]
 
 
-def fit_xgb_for_zone(
+def fit_xgb(
     df: pd.DataFrame,
     horizon: int,
-    zone: str,
     *,
     params: dict[str, Any] | None = None,
 ) -> DirectXGBModel:
-    """Fit one direct horizon model for one zone using train rows only."""
+    """Fit one direct horizon model using train rows only."""
     validated_horizon = validate_horizon(horizon)
-    zone_df = _get_zone_df(df, zone)
-    train_df = get_train_df(zone_df)
+    train_df = get_train_df(df)
     if train_df.empty:
-        raise ValueError(f"Zone {zone!r} has no training rows.")
+        raise ValueError("No training rows available.")
 
-    feature_columns = tuple(get_feature_columns())
+    feature_columns = tuple(get_feature_columns(validated_horizon))
     target_column = get_target_column(validated_horizon)
     estimator_params = {**DEFAULT_XGB_PARAMS, **(params or {})}
     estimator = _import_xgboost()(**estimator_params)
     estimator.fit(train_df.loc[:, feature_columns], train_df[target_column])
 
     return DirectXGBModel(
-        zone=zone,
         horizon=validated_horizon,
         feature_columns=feature_columns,
         target_column=target_column,
@@ -127,7 +113,6 @@ def generate_xgb_residuals(model: DirectXGBModel, df: pd.DataFrame) -> pd.DataFr
     residuals_df = pd.DataFrame(
         {
             "date": df["date"].to_numpy(copy=True),
-            "zone": df["zone"].astype(str).to_numpy(copy=True),
             "horizon": model.horizon,
             "actual": actuals.to_numpy(copy=True),
             "prediction": predictions.to_numpy(copy=True),
@@ -138,24 +123,21 @@ def generate_xgb_residuals(model: DirectXGBModel, df: pd.DataFrame) -> pd.DataFr
     return residuals_df
 
 
-def evaluate_xgb_for_zone(
+def evaluate_xgb(
     df: pd.DataFrame,
     horizon: int,
-    zone: str,
     *,
     params: dict[str, Any] | None = None,
 ) -> tuple[DirectXGBModel, pd.DataFrame]:
-    """Fit one zone/horizon model, predict on that zone's test rows, and score it."""
-    model = fit_xgb_for_zone(df, horizon, zone, params=params)
-    zone_df = _get_zone_df(df, zone)
-    train_df = get_train_df(zone_df)
-    test_df = get_test_df(zone_df)
+    """Fit one horizon model on all data, predict on test split, and score it."""
+    model = fit_xgb(df, horizon, params=params)
+    train_df = get_train_df(df)
+    test_df = get_test_df(df)
     if test_df.empty:
-        raise ValueError(f"Zone {zone!r} has no test rows.")
+        raise ValueError("No test rows available.")
 
     predictions = predict_xgb(model, test_df)
     results = _make_xgb_results_table(
-        test_df.loc[:, ["zone"]],
         test_df[model.target_column],
         predictions,
         horizon=model.horizon,
@@ -163,64 +145,3 @@ def evaluate_xgb_for_zone(
         n_test=len(test_df),
     )
     return model, results
-
-
-def fit_all_horizons_for_zone(
-    df: pd.DataFrame,
-    zone: str,
-    *,
-    params: dict[str, Any] | None = None,
-) -> dict[int, DirectXGBModel]:
-    """Fit horizons 1 through 7 for one selected zone."""
-    return {
-        horizon: fit_xgb_for_zone(df, horizon, zone, params=params)
-        for horizon in ALLOWED_HORIZONS
-    }
-
-
-def fit_xgb_for_all_zones(
-    df: pd.DataFrame,
-    horizon: int,
-    *,
-    params: dict[str, Any] | None = None,
-) -> dict[str, DirectXGBModel]:
-    """Fit one horizon across all zones by looping zone-by-zone."""
-    validated_horizon = validate_horizon(horizon)
-    return {
-        zone: fit_xgb_for_zone(df, validated_horizon, zone, params=params)
-        for zone in get_sorted_zones(df)
-    }
-
-
-def evaluate_xgb_for_all_zones(
-    df: pd.DataFrame,
-    horizon: int,
-    *,
-    params: dict[str, Any] | None = None,
-) -> tuple[dict[str, DirectXGBModel], pd.DataFrame]:
-    """Fit one horizon for all zones and return a combined results table."""
-    models = fit_xgb_for_all_zones(df, horizon, params=params)
-    results_frames: list[pd.DataFrame] = []
-
-    for zone in get_sorted_zones(df):
-        zone_df = _get_zone_df(df, zone)
-        train_df = get_train_df(zone_df)
-        test_df = get_test_df(zone_df)
-        if test_df.empty:
-            raise ValueError(f"Zone {zone!r} has no test rows.")
-
-        model = models[zone]
-        predictions = predict_xgb(model, test_df)
-        results_frames.append(
-            _make_xgb_results_table(
-                test_df.loc[:, ["zone"]],
-                test_df[model.target_column],
-                predictions,
-                horizon=model.horizon,
-                n_train=len(train_df),
-                n_test=len(test_df),
-            )
-        )
-
-    combined_results = pd.concat(results_frames, ignore_index=True)
-    return models, combined_results.loc[:, list(XGB_RESULTS_COLUMNS)]

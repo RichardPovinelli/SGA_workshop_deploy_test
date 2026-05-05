@@ -12,23 +12,20 @@ def predict_naive(df: pd.DataFrame, horizon: int) -> pd.Series:
     """Return a workshop-friendly persistence forecast aligned to ``df``.
 
     The rule is intentionally simple and deterministic:
-    - horizon 1 uses ``lag1`` (yesterday's demand)
-    - horizons 2 through 7 use ``lag7`` (same weekday from the prior week)
+    - horizon 1 uses ``demand_lag1`` (yesterday's demand)
+    - horizons 2 through 7 use ``demand_lag7`` (same weekday from the prior week)
     """
     validated_horizon = validate_horizon(horizon)
-    source_column = "lag1" if validated_horizon == 1 else "lag7"
-    return pd.Series(
-        df[source_column].to_numpy(copy=True), index=df.index, name="prediction"
-    )
+    source_column = "demand_lag1" if validated_horizon == 1 else "demand_lag7"
+    return pd.Series(df[source_column].to_numpy(copy=True), index=df.index, name="prediction")
 
 
 def evaluate_naive_model(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
-    """Return the shared per-zone evaluation table for the naive baseline."""
+    """Return the aggregated evaluation table for the naive baseline."""
     validated_horizon = validate_horizon(horizon)
     predictions = predict_naive(df, validated_horizon)
     target_column = get_target_column(validated_horizon)
     return build_results_table(
-        df.loc[:, ["zone"]],
         df[target_column],
         predictions,
         model_name="naive",

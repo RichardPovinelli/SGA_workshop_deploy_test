@@ -1,11 +1,15 @@
 ipykernel
 matplotlib
+nbformat
 openpyxl
 pandas
+plotly
 pyarrow
 pytest
 ruff
 scikit-learn
 scipy
 statsmodels
+torch
 xgboost
+nbformat

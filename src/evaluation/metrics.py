@@ -9,7 +9,6 @@ import pandas as pd
 
 
 RESULTS_TABLE_COLUMNS: tuple[str, ...] = (
-    "zone",
     "horizon",
     "model",
     "mape",
@@ -18,9 +17,7 @@ RESULTS_TABLE_COLUMNS: tuple[str, ...] = (
 )
 
 
-def _to_1d_array(
-    values: Sequence[float] | pd.Series | np.ndarray, *, name: str
-) -> np.ndarray:
+def _to_1d_array(values: Sequence[float] | pd.Series | np.ndarray, *, name: str) -> np.ndarray:
     array = np.asarray(values, dtype=float)
     if array.ndim != 1:
         raise ValueError(f"{name} must be one-dimensional.")
@@ -49,9 +46,7 @@ def mape(
     non_zero_mask = actual != 0.0
     if not np.any(non_zero_mask):
         raise ValueError("MAPE is undefined when all actual values are zero.")
-    percentage_errors = np.abs(
-        (actual[non_zero_mask] - predicted[non_zero_mask]) / actual[non_zero_mask]
-    )
+    percentage_errors = np.abs((actual[non_zero_mask] - predicted[non_zero_mask]) / actual[non_zero_mask])
     return float(np.mean(percentage_errors) * 100.0)
 
 
@@ -78,38 +73,21 @@ def rmse(
 
 
 def build_results_table(
-    metadata: pd.DataFrame,
     y_true: Sequence[float] | pd.Series | np.ndarray,
     y_pred: Sequence[float] | pd.Series | np.ndarray,
     *,
     model_name: str,
     horizon: int,
 ) -> pd.DataFrame:
-    """Return the shared per-zone results-table contract."""
+    """Return the aggregated results-table contract."""
     actual, predicted = _validate_paired_arrays(y_true, y_pred)
-    if len(metadata) != actual.shape[0]:
-        raise ValueError(
-            "metadata must have the same number of rows as y_true and y_pred."
-        )
-    if "zone" not in metadata.columns:
-        raise ValueError("metadata must contain a 'zone' column.")
 
-    results_rows: list[dict[str, object]] = []
-    working_df = metadata.loc[:, ["zone"]].copy()
-    working_df["y_true"] = actual
-    working_df["y_pred"] = predicted
+    results_row = {
+        "horizon": horizon,
+        "model": model_name,
+        "mape": mape(actual, predicted),
+        "wmape": wmape(actual, predicted),
+        "rmse": rmse(actual, predicted),
+    }
 
-    for zone in sorted(working_df["zone"].astype(str).unique().tolist()):
-        zone_df = working_df.loc[working_df["zone"] == zone]
-        results_rows.append(
-            {
-                "zone": zone,
-                "horizon": horizon,
-                "model": model_name,
-                "mape": mape(zone_df["y_true"], zone_df["y_pred"]),
-                "wmape": wmape(zone_df["y_true"], zone_df["y_pred"]),
-                "rmse": rmse(zone_df["y_true"], zone_df["y_pred"]),
-            }
-        )
-
-    return pd.DataFrame(results_rows, columns=list(RESULTS_TABLE_COLUMNS))
+    return pd.DataFrame([results_row], columns=list(RESULTS_TABLE_COLUMNS))

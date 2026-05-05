@@ -34,6 +34,7 @@ def diebold_mariano_test(
     predictions_b: Sequence[float] | pd.Series | np.ndarray,
     *,
     loss: str = "squared",
+    alternative: str = "two-sided",
 ) -> dict[str, float | int | str]:
     """Compare two forecast series with a simple paired-loss t-statistic.
 
@@ -41,18 +42,20 @@ def diebold_mariano_test(
     standard error of that differential. It is intentionally lightweight and
     suitable for short notebook examples rather than a full HAC-corrected
     econometrics implementation.
+
+    Parameters
+    ----------
+    alternative : {"two-sided", "greater", "less"}
+        - "two-sided": test if predictions differ (default)
+        - "greater": test if predictions_a is better (lower loss)
+        - "less": test if predictions_b is better (lower loss)
     """
     actual = _to_1d_array(actuals, name="actuals")
     predicted_a = _to_1d_array(predictions_a, name="predictions_a")
     predicted_b = _to_1d_array(predictions_b, name="predictions_b")
 
-    if (
-        actual.shape[0] != predicted_a.shape[0]
-        or actual.shape[0] != predicted_b.shape[0]
-    ):
-        raise ValueError(
-            "actuals, predictions_a, and predictions_b must have the same length."
-        )
+    if actual.shape[0] != predicted_a.shape[0] or actual.shape[0] != predicted_b.shape[0]:
+        raise ValueError("actuals, predictions_a, and predictions_b must have the same length.")
     if actual.shape[0] < 2:
         raise ValueError("Diebold-Mariano test requires at least two observations.")
 
@@ -61,6 +64,9 @@ def diebold_mariano_test(
     differential = loss_a - loss_b
     n_obs = int(differential.shape[0])
 
+    if alternative not in ("two-sided", "greater", "less"):
+        raise ValueError(f"alternative must be one of ('two-sided', 'greater', 'less'), got {alternative!r}.")
+
     variance = float(np.var(differential, ddof=1))
     if variance == 0.0:
         statistic = 0.0
@@ -68,11 +74,19 @@ def diebold_mariano_test(
     else:
         standard_error = float(np.sqrt(variance / n_obs))
         statistic = float(np.mean(differential) / standard_error)
-        p_value = float(student_t.sf(np.abs(statistic), df=n_obs - 1) * 2.0)
+        if alternative == "two-sided":
+            p_value = float(student_t.sf(np.abs(statistic), df=n_obs - 1) * 2.0)
+        elif alternative == "greater":
+            # Test if predictions_a has lower loss (negative statistic = better)
+            p_value = float(student_t.cdf(statistic, df=n_obs - 1))
+        else:  # alternative == "less"
+            # Test if predictions_b has lower loss (positive statistic = better)
+            p_value = float(student_t.sf(statistic, df=n_obs - 1))
 
     return {
         "statistic": statistic,
         "p_value": p_value,
         "n_obs": n_obs,
         "loss": loss,
+        "alternative": alternative,
     }

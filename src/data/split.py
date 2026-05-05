@@ -5,13 +5,10 @@ from __future__ import annotations
 import pandas as pd
 
 from src.config import ALLOWED_HORIZONS, REQUIRED_SCHEMA_FIELDS
-from src.data.schema import get_sorted_zones
 
 
-METADATA_FIELDS: tuple[str, ...] = ("date", "zone", "split")
-TARGET_FIELDS: tuple[str, ...] = tuple(
-    field for field in REQUIRED_SCHEMA_FIELDS if field.startswith("target_h")
-)
+METADATA_FIELDS: tuple[str, ...] = ("date", "split")
+TARGET_FIELDS: tuple[str, ...] = tuple(field for field in REQUIRED_SCHEMA_FIELDS if field.startswith("target_h"))
 
 
 def validate_horizon(horizon: int) -> int:
@@ -31,13 +28,22 @@ def get_test_df(df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[df["split"] == "test"].copy()
 
 
-def get_feature_columns() -> list[str]:
-    """Return public feature columns excluding metadata and targets."""
-    return [
+def get_feature_columns(horizon: int | None = None) -> list[str]:
+    """Return feature columns for a given forecast horizon.
+
+    When horizon is provided, includes perfect-weather columns (temp_hN, hdd_hN,
+    cdd_hN) for that horizon only. When omitted, returns base features only.
+    """
+    perfect_weather_fields = frozenset(f"{var}_h{h}" for h in ALLOWED_HORIZONS for var in ("temp", "hdd", "cdd"))
+    base_cols = [
         field
         for field in REQUIRED_SCHEMA_FIELDS
-        if field not in METADATA_FIELDS and field not in TARGET_FIELDS
+        if field not in METADATA_FIELDS and field not in TARGET_FIELDS and field not in perfect_weather_fields
     ]
+    if horizon is None:
+        return base_cols
+    validated = validate_horizon(horizon)
+    return base_cols + [f"temp_h{validated}", f"hdd_h{validated}", f"cdd_h{validated}"]
 
 
 def get_target_column(horizon: int) -> str:
