@@ -10,6 +10,7 @@ ruff
 scikit-learn
 scipy
 statsmodels
+lightning
+pytorch-forecasting
 torch
 xgboost
-nbformat

@@ -8,6 +8,62 @@ from plotly.subplots import make_subplots
 import numpy as np
 from scipy import stats
 
+from src.visualization.colors import ColorType, get_model_colors
+
+
+def _get_colorblind_palette() -> dict[str, str]:
+    """
+    Return Paul Tol's 8-color colorblind-friendly palette.
+
+    Designed to be distinguishable for:
+    - Normal color vision
+    - Deuteranopia (red-green colorblind)
+    - Protanopia (red-green colorblind)
+    - Tritanopia (blue-yellow colorblind)
+
+    Reference: https://personal.sron.nl/~pault/colourschemes.pdf
+    """
+    return {
+        "teal": "#1B9E77",
+        "orange": "#D95F02",
+        "purple": "#7570B3",
+        "magenta": "#E7298A",
+        "green": "#66A61E",
+        "yellow": "#E6AB02",
+        "brown": "#A6761D",
+        "gray": "#666666",
+    }
+
+
+def _get_model_color(model_name: str) -> str:
+    """
+    Get colorblind-friendly color for a model name.
+
+    Converts string model names to ColorType enum and delegates to get_model_colors().
+    Handles common aliases (e.g., 'xgb' -> 'xgboost').
+
+    Uses consistent mapping:
+    - Baseline models: naive (teal), linear (orange)
+    - Regularized models: lasso (purple), elasticnet (magenta)
+    - ML models: xgboost (green), mlp_forecast (yellow)
+    - Fallback: black for unrecognized models
+    """
+    # Normalize model name and handle aliases
+    model_str = str(model_name).lower().strip()
+    alias_map = {
+        "xgb": "xgboost",
+        "mlp": "mlp_forecast",
+    }
+    model_str = alias_map.get(model_str, model_str)
+
+    # Try to find matching ColorType enum
+    for color_type in ColorType:
+        if color_type.value == model_str:
+            return get_model_colors(color_type)
+
+    # Fallback: return black for unrecognized models
+    return "#000000"
+
 
 def _get_theme():
     """Return consistent Plotly theme configuration."""
@@ -55,13 +111,14 @@ def plot_time_series_with_predictions(
         hover_format = "Step %{x}: %{y:.2f}"
         x_axis_label = "Time Step"
 
+    palette = _get_colorblind_palette()
     fig.add_trace(
         go.Scatter(
             x=x_vals,
             y=actual.values,
             mode="lines",
             name="Actual",
-            line={"color": "#1f77b4", "width": 2},
+            line={"color": palette["teal"], "width": 2},
             hovertemplate=f"{hover_format}<extra></extra>",
         )
     )
@@ -72,7 +129,7 @@ def plot_time_series_with_predictions(
             y=predictions.values,
             mode="lines",
             name="Predicted",
-            line={"color": "#ff7f0e", "width": 2, "dash": "dash"},
+            line={"color": palette["orange"], "width": 2, "dash": "dash"},
             hovertemplate=f"{hover_format}<extra></extra>",
         )
     )
@@ -134,6 +191,7 @@ def plot_model_metrics_comparison(
                 x=pivot_df.index,
                 y=pivot_df[col],
                 name=str(col),
+                marker=dict(color=_get_model_color(col)),
                 hovertemplate="%{x}: %{y:.4f}<extra></extra>",
             )
         )
@@ -242,12 +300,13 @@ def plot_residuals_diagnostics(
     )
 
     # Histogram of residuals
+    palette = _get_colorblind_palette()
     fig.add_trace(
         go.Histogram(
             x=residuals,
             name="Residuals",
             nbinsx=30,
-            marker_color="#1f77b4",
+            marker_color=palette["teal"],
             hovertemplate="%{x:.3f}: %{y} samples<extra></extra>",
         ),
         row=1,
@@ -265,7 +324,7 @@ def plot_residuals_diagnostics(
             y=sample_quantiles,
             mode="markers",
             name="Q-Q",
-            marker={"color": "#ff7f0e", "size": 4},
+            marker={"color": palette["orange"], "size": 4},
             hovertemplate="Theoretical: %{x:.3f}<br>Sample: %{y:.3f}<extra></extra>",
         ),
         row=1,
@@ -299,7 +358,7 @@ def plot_residuals_diagnostics(
             x=lags,
             y=acf_values,
             name="ACF",
-            marker_color="#2ca02c",
+            marker_color=palette["green"],
             hovertemplate="Lag %{x}: %{y:.3f}<extra></extra>",
         ),
         row=1,
@@ -387,13 +446,14 @@ def plot_data_overview(
 
     # Temperature trace (right y-axis) if available
     if temp_col and temp_col in df.columns:
+        palette = _get_colorblind_palette()
         fig.add_trace(
             go.Scatter(
                 x=x_vals,
                 y=df[temp_col],
                 mode="lines",
                 name="Temperature",
-                line={"width": 1, "color": "#FF8C00"},  # Orange
+                line={"width": 1, "color": palette["orange"]},
                 yaxis="y2",
                 hovertemplate="Date: %{x|%Y-%m-%d}<br>Temperature: %{y:.2f}°F<extra></extra>"
                 if date_col
@@ -457,13 +517,14 @@ def plot_demand_vs_temperature(
 
     fig = go.Figure()
 
+    palette = _get_colorblind_palette()
     fig.add_trace(
         go.Scatter(
             x=subset[temp_col],
             y=subset[target_col],
             mode="markers",
             name="Training Data",
-            marker={"size": 6, "color": "#1f77b4", "opacity": 0.6},
+            marker={"size": 6, "color": palette["teal"], "opacity": 0.6},
             customdata=subset[date_col],
             hovertemplate="Date: %{customdata|%Y-%m-%d}<br>Temperature: %{x:.2f}°F<br>Demand: %{y:.2f}<extra></extra>",
         )
@@ -506,6 +567,7 @@ def plot_data_split_distribution(
     total = sum(counts)
     percentages = [100 * c / total for c in counts]
 
+    palette = _get_colorblind_palette()
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
@@ -513,7 +575,7 @@ def plot_data_split_distribution(
             y=counts,
             text=[f"{pct:.1f}%" for pct in percentages],
             textposition="outside",
-            marker_color=["#1f77b4", "#ff7f0e", "#2ca02c"],
+            marker_color=[palette["teal"], palette["orange"], palette["green"]],
             hovertemplate="%{x}: %{y} observations<extra></extra>",
         )
     )
