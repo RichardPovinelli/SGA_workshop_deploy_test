@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import json
+import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,7 +19,6 @@ from src.config import (
     EXPECTED_TFT_CHECKPOINT_FORMAT_VERSION,
     EXPECTED_TFT_RUNTIME_COMPATIBILITY_VERSION,
     TFT_ARTIFACT_TYPE,
-    TFT_CHECKPOINT_FILENAME,
     TFT_CHECKPOINT_MAP_FILENAME,
     TFT_MAX_ENCODER_LENGTH,
     TFT_MAX_PREDICTION_LENGTH,
@@ -66,6 +68,58 @@ _TFT_KNOWN_REALS = ["time_idx", "dow", "is_weekend", "month"]
 _TFT_UNKNOWN_REALS = ["demand", "temp", "hdd", "cdd"]
 
 
+@contextmanager
+def _suppress_tft_runtime_noise() -> Any:
+    """Suppress Lightning-family warnings/log output during TFT operations."""
+    logger_names = (
+        "lightning",
+        "lightning.pytorch",
+        "lightning_fabric",
+        "lightning_utilities",
+        "pytorch_lightning",
+        "pytorch_forecasting",
+    )
+    previous_levels: dict[str, int] = {}
+    for name in logger_names:
+        logger = logging.getLogger(name)
+        previous_levels[name] = logger.level
+        # CRITICAL+1 effectively silences all records for this logger tree.
+        logger.setLevel(logging.CRITICAL + 1)
+
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                category=UserWarning,
+                module=r"(lightning|lightning_utilities|lightning_fabric|pytorch_lightning|pytorch_forecasting)(\..*)?",
+            )
+            warnings.filterwarnings(
+                "ignore",
+                category=RuntimeWarning,
+                module=r"(lightning|lightning_utilities|lightning_fabric|pytorch_lightning|pytorch_forecasting)(\..*)?",
+            )
+            warnings.filterwarnings(
+                "ignore",
+                category=FutureWarning,
+                module=r"(lightning|lightning_utilities|lightning_fabric|pytorch_lightning|pytorch_forecasting)(\..*)?",
+            )
+            warnings.filterwarnings(
+                "ignore",
+                category=DeprecationWarning,
+                module=r"(lightning|lightning_utilities|lightning_fabric|pytorch_lightning|pytorch_forecasting)(\..*)?",
+            )
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*isinstance\(treespec, LeafSpec\).*deprecated.*",
+                category=Warning,
+                module=r"torch\.utils\._pytree",
+            )
+            yield
+    finally:
+        for name in logger_names:
+            logging.getLogger(name).setLevel(previous_levels[name])
+
+
 def _prepare_tft_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Sort by date and add time_idx / group_id columns required by TimeSeriesDataSet."""
     df = df.copy().sort_values("date").reset_index(drop=True)
@@ -86,9 +140,7 @@ def _make_tft_dataset(
     try:
         from pytorch_forecasting import TimeSeriesDataSet
     except ImportError as exc:
-        raise TFTDependencyError(
-            "pytorch-forecasting is required: pip install pytorch-forecasting"
-        ) from exc
+        raise TFTDependencyError("pytorch-forecasting is required: pip install pytorch-forecasting") from exc
 
     return TimeSeriesDataSet(
         df,
@@ -119,13 +171,11 @@ def train_tft_model(
     """Train a TFT model on the training split and return the fitted model."""
     try:
         import lightning.pytorch as pl
-        import torch
         from pytorch_forecasting import TemporalFusionTransformer
         from pytorch_forecasting.metrics import MAE
     except ImportError as exc:
         raise TFTDependencyError(
-            "pytorch-forecasting and lightning are required: "
-            "pip install pytorch-forecasting lightning"
+            "pytorch-forecasting and lightning are required: pip install pytorch-forecasting lightning"
         ) from exc
 
     if df is None:
@@ -153,8 +203,8 @@ def train_tft_model(
         max_prediction_length=TFT_MAX_PREDICTION_LENGTH,
     )
 
-    train_loader = training_dataset.to_dataloader(train=True, batch_size=64, num_workers=0)
-    val_loader = validation_dataset.to_dataloader(train=False, batch_size=64, num_workers=0)
+    train_loader = training_dataset.to_dataloader(train=True, batch_size=64, num_workers=15)
+    val_loader = validation_dataset.to_dataloader(train=False, batch_size=64, num_workers=15)
 
     tft = TemporalFusionTransformer.from_dataset(
         training_dataset,
@@ -205,9 +255,7 @@ def load_installed_tft_checkpoint_map(
 
     artifact_type = manifest.get("artifact_type")
     if artifact_type != TFT_ARTIFACT_TYPE:
-        raise TFTCheckpointMapError(
-            f"Expected artifact_type {TFT_ARTIFACT_TYPE!r}, got {artifact_type!r}"
-        )
+        raise TFTCheckpointMapError(f"Expected artifact_type {TFT_ARTIFACT_TYPE!r}, got {artifact_type!r}")
 
     fmt_version = manifest.get("checkpoint_format_version")
     if fmt_version != EXPECTED_TFT_CHECKPOINT_FORMAT_VERSION:
@@ -257,20 +305,15 @@ def load_tft_model(
     try:
         from pytorch_forecasting import TemporalFusionTransformer
     except ImportError as exc:
-        raise TFTDependencyError(
-            "pytorch-forecasting is required: pip install pytorch-forecasting"
-        ) from exc
+        raise TFTDependencyError("pytorch-forecasting is required: pip install pytorch-forecasting") from exc
 
     checkpoint_map = load_installed_tft_checkpoint_map(artifact_root=artifact_root)
 
     try:
-        return TemporalFusionTransformer.load_from_checkpoint(
-            str(checkpoint_map.checkpoint_path)
-        )
+        with _suppress_tft_runtime_noise():
+            return TemporalFusionTransformer.load_from_checkpoint(str(checkpoint_map.checkpoint_path))
     except Exception as exc:
-        raise TFTExtractionError(
-            f"Failed to load TFT checkpoint from {checkpoint_map.checkpoint_path}: {exc}"
-        ) from exc
+        raise TFTExtractionError(f"Failed to load TFT checkpoint from {checkpoint_map.checkpoint_path}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -293,11 +336,16 @@ def _predict_all_horizons(
     test_mask = df_prep["split"] == "test"
     test_rows = df_prep[test_mask]
     n_test = len(test_rows)
-
-    # Reconstruct the original df index for alignment
     original_test_index = df[df["split"] == "test"].index
-
     all_preds = np.full((n_test, TFT_MAX_PREDICTION_LENGTH), np.nan)
+
+    # Build one window per test row, each tagged with a unique group_id.
+    # pytorch-forecasting with predict_mode=True creates exactly one prediction
+    # per group (the last valid decoder position), so n_groups == n_predictions.
+    # Concatenating all windows into one DataFrame lets us run a single
+    # dataset + DataLoader + model.predict() call instead of one per test row.
+    windows: list[pd.DataFrame] = []
+    valid_indices: list[int] = []  # positions in all_preds that will be filled
 
     for i, (_, row) in enumerate(test_rows.iterrows()):
         end_idx = int(row["time_idx"])
@@ -308,21 +356,44 @@ def _predict_all_horizons(
             (df_prep["time_idx"] >= start_idx) & (df_prep["time_idx"] <= future_end_idx)
         ].copy()
 
-        # Skip if we don't have enough future context
-        n_future = len(window[window["time_idx"] > end_idx])
-        if n_future < TFT_MAX_PREDICTION_LENGTH:
+        if len(window[window["time_idx"] > end_idx]) < TFT_MAX_PREDICTION_LENGTH:
             continue
 
+        window["group_id"] = f"g{i}"
+        windows.append(window)
+        valid_indices.append(i)
+
+    if not windows:
+        return all_preds, original_test_index
+
+    combined_df = pd.concat(windows, ignore_index=True)
+
+    with _suppress_tft_runtime_noise():
         dataset = _make_tft_dataset(
-            window,
+            combined_df,
             max_encoder_length=max_encoder_length,
             max_prediction_length=TFT_MAX_PREDICTION_LENGTH,
             predict_mode=True,
         )
-        loader = dataset.to_dataloader(train=False, batch_size=1, num_workers=0)
+        loader = dataset.to_dataloader(train=False, batch_size=64, num_workers=0)
         raw = model.predict(loader, mode="prediction")
-        # raw shape: (n_samples, 7); take the last sample (prediction from encoder end)
-        all_preds[i] = raw[-1].detach().cpu().numpy()
+
+    raw_np = raw.detach().cpu().numpy()  # shape: (n_valid, 7)
+
+    # Map predictions back to all_preds positions using dataset.index group ordering.
+    ds_idx = dataset.index
+    if "group_id" in ds_idx.columns:
+        group_order = ds_idx["group_id"].tolist()
+        gid_to_pred = {gid: raw_np[j] for j, gid in enumerate(group_order)}
+        for test_i in valid_indices:
+            gid = f"g{test_i}"
+            if gid in gid_to_pred:
+                all_preds[test_i] = gid_to_pred[gid]
+    else:
+        # Fallback: output order matches valid_indices order
+        for j, test_i in enumerate(valid_indices):
+            if j < len(raw_np):
+                all_preds[test_i] = raw_np[j]
 
     return all_preds, original_test_index
 
@@ -337,6 +408,21 @@ def predict_tft(
     validate_horizon(horizon)
     all_preds, test_index = _predict_all_horizons(df, model=model)
     return pd.Series(all_preds[:, horizon - 1], index=test_index, name="prediction")
+
+
+def predict_tft_all_horizons(
+    df: pd.DataFrame,
+    *,
+    model: Any,
+) -> pd.DataFrame:
+    """Return TFT predictions for all horizons (1..7) on test rows.
+
+    Returns a DataFrame indexed to test rows with columns:
+    prediction_h1, prediction_h2, ..., prediction_h7.
+    """
+    all_preds, test_index = _predict_all_horizons(df, model=model)
+    columns = [f"prediction_h{h}" for h in ALLOWED_HORIZONS]
+    return pd.DataFrame(all_preds, index=test_index, columns=columns)
 
 
 # ---------------------------------------------------------------------------
@@ -376,3 +462,63 @@ def evaluate_tft_model(
         model_name="tft",
         horizon=horizon,
     )
+
+
+def evaluate_tft_models(
+    df: pd.DataFrame,
+    *,
+    model: Any,
+    predictions_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Evaluate TFT across all horizons using cached predictions when provided.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Full dataset containing train/test split and target_h1..target_h7 columns.
+    model : Any
+        Loaded TFT model used only when predictions_df is not provided.
+    predictions_df : pd.DataFrame | None
+        Optional cached predictions from `predict_tft_all_horizons`.
+
+    Returns
+    -------
+    pd.DataFrame
+        Seven-row results table (one per horizon) with columns:
+        horizon, model, mape, wmape, rmse.
+    """
+    from src.data.split import get_target_column, get_test_df
+
+    test_df = get_test_df(df)
+
+    if predictions_df is None:
+        predictions_df = predict_tft_all_horizons(df, model=model)
+
+    all_results: list[pd.DataFrame] = []
+    for horizon in ALLOWED_HORIZONS:
+        target_col = get_target_column(horizon)
+        pred_col = f"prediction_h{horizon}"
+        if pred_col not in predictions_df.columns:
+            raise ValueError(f"predictions_df is missing required column: {pred_col}")
+
+        y_true = test_df[target_col]
+        predictions = predictions_df[pred_col]
+
+        valid = predictions.notna()
+        if not valid.any():
+            raise ValueError(
+                "All TFT predictions are NaN for horizon "
+                f"{horizon}. This usually means the model diverged during training "
+                "(NaN weights). Retrain with: python tools/train_tft_checkpoint.py"
+            )
+
+        all_results.append(
+            build_results_table(
+                y_true[valid],
+                predictions[valid],
+                model_name="tft",
+                horizon=horizon,
+            )
+        )
+
+    return pd.concat(all_results, ignore_index=True)

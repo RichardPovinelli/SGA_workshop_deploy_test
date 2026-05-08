@@ -35,8 +35,10 @@ from src.models.tft import (
     TFTDependencyError,
     TFTExtractionError,
     evaluate_tft_model,
+    evaluate_tft_models,
     load_installed_tft_checkpoint_map,
     load_tft_model,
+    predict_tft_all_horizons,
     predict_tft,
     train_tft_model,
 )
@@ -87,8 +89,10 @@ __all__ = [
     "TFTDependencyError",
     "TFTExtractionError",
     "evaluate_tft_model",
+    "evaluate_tft_models",
     "load_installed_tft_checkpoint_map",
     "load_tft_model",
+    "predict_tft_all_horizons",
     "predict_tft",
     "train_tft_model",
 ]
